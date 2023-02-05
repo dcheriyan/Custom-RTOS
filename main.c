@@ -12,7 +12,7 @@ enum State{
 
 typedef struct {
     uint8_t Taskid;
-	uint32_t Stack_Pointer;		//Functions that use this Address take uint32_t
+	uint32_t Stack_Pointer;		//Functions that use this Address use uint32_t
     uint8_t Priority;
     void * Linked_List;			//May have to change pointer type
     uint8_t Event_Flags;
@@ -25,8 +25,7 @@ uint32_t msTicks = 0;
 static Task_Control_Block TCB[6];
 
 //Initialize the Kernel based on the configuration
-static bool Kernel_Init(void) {
-	bool status = false;
+static void Kernel_Init(void) {
 	uint32_t* MainStackBase = (uint32_t*)0x0;
 
 	TCB[5].Stack_Pointer = *MainStackBase - 0x800;
@@ -35,9 +34,6 @@ static bool Kernel_Init(void) {
 	TCB[2].Stack_Pointer = TCB[3].Stack_Pointer - 0x400;
 	TCB[1].Stack_Pointer = TCB[2].Stack_Pointer - 0x400;
 	TCB[0].Stack_Pointer = TCB[1].Stack_Pointer - 0x400;
-
-	status = true;
-	return status;
 }
 
 //Start Kernel and transform into Idle Function
@@ -48,18 +44,14 @@ static void Kernel_Start(void) {
 
 	//Set MSP
 	__set_MSP(*MainStackBase);
-	 printf("MSP after being set is %x \n", __get_MSP());
 
 	//Switch to PSP
-	printf("Control before being set is %x \n", __get_CONTROL());
 	Set_Stack_Mask = (CONTROL_Type)__get_CONTROL();
 	Set_Stack_Mask.b.SPSEL = 1;
-	printf("Control to set is %x \n", Set_Stack_Mask.w);
 	__set_CONTROL(Set_Stack_Mask.w);
 
 	//Set PSP  to base of Idle Task, TCB[0]
 	__set_PSP((uint32_t)TCB[0].Stack_Pointer);
-	printf("PSP after being set is %x \n", __get_PSP());
 
 	//Configure Systick
 	SysTick_Config(SystemCoreClock/1000);
@@ -96,8 +88,7 @@ __asm void PendSV_Handler(void) {
 }
 */
 int main(void) {
-	bool Init_Status = Kernel_Init();
-	printf("Kernel Init Status %d \n", Init_Status);
+	Kernel_Init();
 
 	Kernel_Start();
 }
