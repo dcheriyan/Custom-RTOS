@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-//Data Structures
+/******** Data Structures ********/
 //States a Task can be in
 enum State{
 	Inactive,
@@ -25,16 +25,17 @@ typedef struct Task_Control_Block{
 	struct Task_Control_Block *Next_TCB;
 } Task_Control_Block_t;
 
-//Global Variables
+/******** Global Variables ********/
 const uint8_t MAX_TASKS = 6;
 uint32_t msTicks = 0;
 static volatile Task_Control_Block_t TCBs[6];
 static volatile Task_Control_Block_t *Current_running_TCB;
 
-bool create_task(rtosTaskFunc_t Func_addr, void *Func_args, uint8_t Assigned_task_id, uint8_t Assigned_priority){
+/******** TCB Related Functions ********/
+bool create_task(rtosTaskFunc_t Func_addr, void *Func_args, uint8_t Assigned_task_id, uint8_t Assigned_priority) {
     //Check inputs are Valid
     //Make sure valid taskid
-    if (Assigned_task_id > (MAX_TASKS - 1)){
+    if (Assigned_task_id > (MAX_TASKS - 1)) {
         return false;
     }
 
@@ -83,6 +84,33 @@ bool create_task(rtosTaskFunc_t Func_addr, void *Func_args, uint8_t Assigned_tas
     return true;
 }
 
+/******** Task Functions ********/
+void Idle_function (void *Input_args){
+	uint32_t period = 500; // 0.5s because emulator is slow
+	uint32_t prev = -period;
+	while(true) {
+		//Produce some output so we know idle function is running
+		if((uint32_t)(msTicks - prev) >= period) {
+			printf("idle tick \n");
+			prev += period;
+		}
+	}
+}
+
+void Test_function (void *Input_args){
+	uint32_t period = 200; // 0.5s because emulator is slow
+	uint32_t prev = -period;
+	while(true) {
+		//Produce some output so we know idle function is running
+		if((uint32_t)(msTicks - prev) >= period) {
+			printf("Testing... \n");
+			prev += period;
+		}
+	}
+}
+
+
+/******** Kernel Functions ********/
 //Initialize the Kernel based on the configuration
 static void Kernel_Init(void) {
 	const uint32_t *MainStackBase = (uint32_t *)0x0;
@@ -124,21 +152,13 @@ static void Kernel_Start(void) {
 	printf("\nStarting Systick\n\n");
 
 	//Transform idle task
+	TCBs[0].Priority = 0;
 	TCBs[0].Current_state = Running;
-
-	uint32_t period = 500; // 0.5s because emulator is slow
-	uint32_t prev = -period;
-	while(true) {
-		//Produce some output so we know idle function is running
-		if((uint32_t)(msTicks - prev) >= period) {
-			printf("idle tick ");
-			prev += period;
-		}
-	}
+	Idle_function(NULL);
 }
 
-void SysTick_Handler(void)
-{
+/******** Interrupts ********/
+void SysTick_Handler(void) {
     msTicks++;
 }
 
@@ -150,8 +170,11 @@ __asm void PendSV_Handler(void) {
 	BX		LR
 }
 */
+
 int main(void) {
 	Kernel_Init();
+
+	bool Task_one_status = create_task(&Test_function, NULL, 1, 1);
 
 	Kernel_Start();
 }
