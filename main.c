@@ -80,14 +80,32 @@ void SysTick_Handler(void)
 }
 
 
-/*
+
 __asm void PendSV_Handler(void) {
+	//Push register R4-R11 onto the current task's stack
+
+	//move TCB address to a register
+
+	//store current stack pointer to the TCB
+
+	//get TCB address for next task
+
+	//get the address of the next stack pointer from its TCB
+
+	//Set the stack pointer
+
+	// pop R4-R11 for the new task
 
 	// return from handler
 	BX		LR
 }
-*/
+
 int main(void) {
+	//Systick is highest prio
+	NVIC_SetPriority(-1, 0);
+	//PendSV is lowest prio
+	NVIC_SetPriority(-2, 0xff);
+
 	Kernel_Init();
 
 	Kernel_Start();
