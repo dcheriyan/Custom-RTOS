@@ -20,29 +20,101 @@ typedef struct Task_Control_Block{
 	enum State Current_state;
 	uint8_t Event_flags;
 	uint8_t Task_id;
-	struct Task_Control_Block *Next_TCB;
+	volatile struct Task_Control_Block *Next_TCB;
 } Task_Control_Block_t;
 
 /******** Global Variables ********/
-const uint8_t MAX_TASKS = 6;
+#define MAX_TASKS 6
+//Priority Ranges from 0-5, lower is more important
+#define NUM_PRIORITIES 6
 uint32_t msTicks = 0;
-static volatile Task_Control_Block_t TCBs[6];
+uint32_t timeslice = 100; // 0.1s
+
+volatile Task_Control_Block_t TCBs[6];
+
+//Scheduler
 volatile Task_Control_Block_t *Current_running_TCB;
+volatile Task_Control_Block_t *Prev_TCB = NULL;
+
+volatile Task_Control_Block_t *Ready_TCBs[NUM_PRIORITIES];
+volatile Task_Control_Block_t *Inactive_TCB;
+
+uint32_t Ready_queue_bit_vector;
+
+//Context Switch
 //Initialize to an obvious invalid address so we can tell if it has been modifed or not
-volatile uint32_t Current_top_stack = (uint32_t)-1;
-volatile Task_Control_Block_t *Next_TCB;
+volatile uint32_t Previous_top_stack = (uint32_t)-1;
 volatile uint32_t Next_top_stack;
 
-/******** Interrupts ********/
-void SysTick_Handler(void) {
-    msTicks++;
-	if (msTicks == 100){
+/******** Scheduler ********/
+void scheduler(void){
+	//Load SP into prev task TCB after a context switch if necessary
+	if((Prev_TCB != NULL) && (Prev_TCB != Current_running_TCB)) {
+		Prev_TCB->Top_of_stack = (void *) Previous_top_stack;
+	}
+
+	//Update prev to the last task to run
+	Prev_TCB = Current_running_TCB;
+
+	//If current is finished store in Finished queue
+	if(Current_running_TCB->Current_state == Inactive) {
+		Current_running_TCB->Next_TCB = Inactive_TCB;
+		Inactive_TCB = Current_running_TCB;
+	}
+	else {
+		//If not finished set to ready, and push to back of its the ready queue
+		Current_running_TCB->Current_state = Ready;
+
+		if(Ready_TCBs[Current_running_TCB->Priority] == NULL){
+			Ready_TCBs[Current_running_TCB->Priority] = Current_running_TCB;
+			//Set vector since it was previously empty
+			Ready_queue_bit_vector |= 1 << Current_running_TCB->Priority;
+		}
+		else {
+			volatile Task_Control_Block_t * Find_last = Ready_TCBs[Current_running_TCB->Priority];
+			while(Find_last->Next_TCB != NULL){
+				Find_last = Find_last->Next_TCB;
+			}
+			Find_last->Next_TCB = Current_running_TCB;
+		}
+	}
+
+	//Check if any finished should be moved back to ready
+
+	//Find highest prio ready
+	uint8_t Top_priority = __builtin_ctz( Ready_queue_bit_vector );
+
+	//remove from queue and Set to running
+	Current_running_TCB = Ready_TCBs[Top_priority];
+	Current_running_TCB->Current_state = Running;
+
+	if (Current_running_TCB->Next_TCB == NULL) {
+		Ready_TCBs[Top_priority] = NULL;
+		Ready_queue_bit_vector &= ~(1 << Current_running_TCB->Priority);
+	}
+	else {
+		Ready_TCBs[Top_priority] = Current_running_TCB->Next_TCB;
+	}
+
+	//If the new one is different from the previous cause a context switch
+	if(Current_running_TCB != Prev_TCB){
+		Next_top_stack = (uint32_t) Current_running_TCB->Top_of_stack;
 		//Cause an Exception to for a context switch
 		SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
 	}
 }
 
+void ready_again(void){
 
+}
+
+/******** Interrupts ********/
+void SysTick_Handler(void) {
+    msTicks++;
+	if (msTicks%timeslice == 0){
+		scheduler();
+	}
+}
 
 __asm void PendSV_Handler(void) {
 	//Get Current Stack Pointer
@@ -52,7 +124,7 @@ __asm void PendSV_Handler(void) {
     STMDB R0!, {R4-R11}
 
     //Record current stack pointer
-	LDR R1, =__cpp(&Current_top_stack)
+	LDR R1, =__cpp(&Previous_top_stack)
 	STR R0, [R1]
 
 	//Still need a way to get this from the global to its TCB
@@ -121,6 +193,20 @@ bool create_task(rtosTaskFunc_t Func_addr, void *Func_args, uint8_t Assigned_tas
     TCBs[Assigned_task_id].Current_state = Ready;
     TCBs[Assigned_task_id].Top_of_stack = (uint32_t *) TCBs[Assigned_task_id].Top_of_stack - 16;
 
+	//Load TCB into the Ready Queue
+	if(Ready_TCBs[Assigned_priority] == NULL){
+		Ready_TCBs[Assigned_priority] = &TCBs[Assigned_task_id];
+		//Set vector since it was previously empty
+		Ready_queue_bit_vector |= 1 << Assigned_priority;
+	}
+	else {
+		volatile Task_Control_Block_t * Find_last = Ready_TCBs[Assigned_priority];
+		while(Find_last->Next_TCB != NULL) {
+			Find_last = Find_last->Next_TCB;
+		}
+		Find_last->Next_TCB = &TCBs[Assigned_task_id];
+	}
+
     return true;
 }
 
@@ -144,6 +230,7 @@ void Test_function (void *Input_args){
 		if((uint32_t)(msTicks - prev) >= period) {
 			printf("Testing... \n");
 			prev += period;
+			TCBs[1].Current_state = Inactive;
 		}
 	}
 }
@@ -191,8 +278,10 @@ static void Kernel_Start(void) {
 	printf("\nStarting Systick\n\n");
 
 	//Transform idle task
-	TCBs[0].Priority = 6;
+	TCBs[0].Priority = 5;
 	TCBs[0].Current_state = Running;
+	Current_running_TCB = &(TCBs[0]);
+
 	Idle_function(NULL);
 }
 
