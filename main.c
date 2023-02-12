@@ -21,6 +21,8 @@ typedef struct Task_Control_Block{
 	uint8_t Event_flags;
 	uint8_t Task_id;
 	volatile struct Task_Control_Block *Next_TCB;
+	uint16_t Period;
+	uint32_t Number_of_Occur;
 } Task_Control_Block_t;
 
 /******** Global Variables ********/
@@ -47,6 +49,38 @@ volatile uint32_t Previous_top_stack = (uint32_t)-1;
 volatile uint32_t Next_top_stack;
 
 /******** Scheduler ********/
+void ready_again(void){
+	//Go through queue and check if a task needs to be reset
+	if (Inactive_TCB != NULL) {
+		volatile Task_Control_Block_t * TCB_to_check = Inactive_TCB;
+		volatile Task_Control_Block_t * next_TCB_to_check;
+
+		while(TCB_to_check != NULL){
+			next_TCB_to_check = TCB_to_check->Next_TCB;
+			if(msTicks/TCB_to_check->Period >= TCB_to_check->Number_of_Occur) {
+				//If its time to run them again move them to the ready queue
+				TCB_to_check->Current_state = Ready;
+				if(Ready_TCBs[TCB_to_check->Priority] == NULL){
+					Ready_TCBs[TCB_to_check->Priority] = TCB_to_check;
+					//Set vector since it was previously empty
+					Ready_queue_bit_vector |= 1 << TCB_to_check->Priority;
+				}
+				else {
+					volatile Task_Control_Block_t * Find_last = Ready_TCBs[TCB_to_check->Priority];
+					while(Find_last->Next_TCB != NULL) {
+						Find_last = Find_last->Next_TCB;
+					}
+					Find_last->Next_TCB = TCB_to_check;
+					//Remove the next TCB so we don't accidently copy it incorrectly
+					TCB_to_check->Next_TCB = NULL;
+				}
+				Inactive_TCB = next_TCB_to_check;
+			}
+			TCB_to_check = next_TCB_to_check;
+		}
+	}
+}
+
 void scheduler(void){
 	//Load SP into prev task TCB after a context switch if necessary
 	if((Prev_TCB != NULL) && (Prev_TCB != Current_running_TCB)) {
@@ -80,6 +114,7 @@ void scheduler(void){
 	}
 
 	//Check if any finished should be moved back to ready
+	ready_again();
 
 	//Find highest prio ready
 	uint8_t Top_priority = __builtin_ctz( Ready_queue_bit_vector );
@@ -103,11 +138,6 @@ void scheduler(void){
 		SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
 	}
 }
-
-void ready_again(void){
-
-}
-
 /******** Interrupts ********/
 void SysTick_Handler(void) {
     msTicks++;
@@ -144,7 +174,7 @@ __asm void PendSV_Handler(void) {
 }
 
 /******** TCB Related Functions ********/
-bool create_task(rtosTaskFunc_t Func_addr, void *Func_args, uint8_t Assigned_task_id, uint8_t Assigned_priority) {
+bool create_task(rtosTaskFunc_t Func_addr, void *Func_args, uint8_t Assigned_task_id, uint8_t Assigned_priority, uint16_t Assigned_period) {
     //Check inputs are Valid
     //Make sure valid taskid
     if (Assigned_task_id > (MAX_TASKS - 1)) {
@@ -191,6 +221,7 @@ bool create_task(rtosTaskFunc_t Func_addr, void *Func_args, uint8_t Assigned_tas
     //Finish setting up the corresponding TCB
     TCBs[Assigned_task_id].Priority = Assigned_priority;
     TCBs[Assigned_task_id].Current_state = Ready;
+	TCBs[Assigned_task_id].Period = Assigned_period;
     TCBs[Assigned_task_id].Top_of_stack = (uint32_t *) TCBs[Assigned_task_id].Top_of_stack - 16;
 
 	//Load TCB into the Ready Queue
@@ -224,13 +255,14 @@ void Idle_function (void *Input_args){
 }
 
 void Test_function (void *Input_args){
-	uint32_t period = 100; // 0.1s
+	uint32_t period = 400; // 0.4s
 	uint32_t prev = -period;
 	while(true) {
 		if((uint32_t)(msTicks - prev) >= period) {
 			printf("Testing... \n");
 			prev += period;
 			TCBs[1].Current_state = Inactive;
+			TCBs[1].Number_of_Occur++;
 		}
 	}
 }
@@ -293,7 +325,7 @@ int main(void) {
 
 	Kernel_Init();
 
-	bool Task_one_status = create_task(&Test_function, NULL, 1, 1);
+	bool Task_one_status = create_task(&Test_function, NULL, 1, 1, 400);
 	Next_top_stack = (uint32_t)TCBs[1].Top_of_stack;
 
 	Kernel_Start();
