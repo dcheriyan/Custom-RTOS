@@ -8,7 +8,7 @@
 
 /******** Global Variables ********/
 uint32_t msTicks = 0;
-uint32_t timeslice = 100; // 0.1s
+uint32_t timeslice = 50; // 0.05s
 
 volatile Task_Control_Block_t TCBs[6];
 
@@ -62,15 +62,54 @@ __asm void PendSV_Handler(void) {
 }
 
 /******** Task Functions ********/
-void Test_function (void *Input_args){
-	uint32_t period = 400; // 0.4s
+void Task1_function (void *Input_args){
+	uint32_t period = 500; // 0.5s
 	uint32_t prev = -period;
 	while(true) {
 		if((uint32_t)(msTicks - prev) >= period) {
-			printf("Testing... \n");
+			printf("Task 1... \n");
 			prev += period;
 			TCBs[1].Current_state = Inactive;
 			TCBs[1].Number_of_Occur++;
+		}
+	}
+}
+
+void Task2_function (void *Input_args){
+	uint32_t period = 1000; // 1s
+	uint32_t prev = -period;
+	while(true) {
+		if((uint32_t)(msTicks - prev) >= period) {
+			printf("Task 2... \n");
+			prev += period;
+			TCBs[2].Current_state = Inactive;
+			TCBs[2].Number_of_Occur++;
+		}
+	}
+}
+
+void Task3_function (void *Input_args){
+	uint32_t period = 1000; // 1s
+	uint32_t prev = -period;
+	while(true) {
+		if((uint32_t)(msTicks - prev) >= period) {
+			printf("Task 3... \n");
+			prev += period;
+			TCBs[3].Current_state = Inactive;
+			TCBs[3].Number_of_Occur++;
+		}
+	}
+}
+
+void Task4_function (void *Input_args){
+	uint32_t period = 1500; // 1.5s
+	uint32_t prev = -period;
+	while(true) {
+		if((uint32_t)(msTicks - prev) >= period) {
+			printf("Task 4... \n");
+			prev += period;
+			TCBs[4].Current_state = Inactive;
+			TCBs[4].Number_of_Occur++;
 		}
 	}
 }
@@ -83,8 +122,10 @@ int main(void) {
 
 	Kernel_Init();
 
-	bool Task_one_status = create_task(&Test_function, NULL, 1, 1, 400);
-	Next_top_stack = (uint32_t)TCBs[1].Top_of_stack;
+	bool Task_one_status = create_task(&Task1_function, NULL, 1, 1, 500);
+	bool Task_two_status = create_task(&Task2_function, NULL, 2, 2, 1000);
+	bool Task_three_status = create_task(&Task3_function, NULL, 3, 2, 1000);
+	bool Task_four_status = create_task(&Task4_function, NULL, 4, 4, 1500);
 
 	Kernel_Start();
 }

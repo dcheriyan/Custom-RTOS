@@ -5,11 +5,14 @@ void ready_again(void){
 	if (Inactive_TCB != NULL) {
 		volatile Task_Control_Block_t * TCB_to_check = Inactive_TCB;
 		volatile Task_Control_Block_t * next_TCB_to_check;
+		volatile Task_Control_Block_t * prev_TCB_checked = NULL;
+		bool moved = false;
 
 		while(TCB_to_check != NULL){
 			next_TCB_to_check = TCB_to_check->Next_TCB;
 			if(msTicks/TCB_to_check->Period >= TCB_to_check->Number_of_Occur) {
 				//If its time to run them again move them to the ready queue
+				moved = true;
 				TCB_to_check->Current_state = Ready;
 				if(Ready_TCBs[TCB_to_check->Priority] == NULL){
 					Ready_TCBs[TCB_to_check->Priority] = TCB_to_check;
@@ -22,11 +25,20 @@ void ready_again(void){
 						Find_last = Find_last->Next_TCB;
 					}
 					Find_last->Next_TCB = TCB_to_check;
-					//Remove the next TCB so we don't accidently copy it incorrectly
-					TCB_to_check->Next_TCB = NULL;
 				}
-				Inactive_TCB = next_TCB_to_check;
+				//Remove the next TCB so we don't accidently copy it incorrectly
+				TCB_to_check->Next_TCB = NULL;
+				if (Inactive_TCB == TCB_to_check) {
+					Inactive_TCB = next_TCB_to_check;
+				}
+				else {
+					prev_TCB_checked->Next_TCB = next_TCB_to_check;
+				}
 			}
+			if (!moved){
+				prev_TCB_checked = TCB_to_check;
+			}
+			moved = false;
 			TCB_to_check = next_TCB_to_check;
 		}
 	}
