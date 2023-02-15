@@ -12,3 +12,4 @@ extern volatile uint32_t Next_top_stack;
 void ready_again(void);
 void scheduler(void);
 void insert_into_ready(volatile Task_Control_Block_t * TCB_to_insert);
+void remove_from_ready(volatile Task_Control_Block_t * TCB_to_remove);

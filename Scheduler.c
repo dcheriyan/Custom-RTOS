@@ -66,13 +66,7 @@ void scheduler(void){
 	Current_running_TCB = Ready_TCBs[Top_priority];
 	Current_running_TCB->Current_state = Running;
 
-	if (Current_running_TCB->Next_TCB == NULL) {
-		Ready_TCBs[Top_priority] = NULL;
-		Ready_queue_bit_vector &= ~(1 << Current_running_TCB->Priority);
-	}
-	else {
-		Ready_TCBs[Top_priority] = Current_running_TCB->Next_TCB;
-	}
+	remove_from_ready(Current_running_TCB);
 
 	//If the new one is different from the previous cause a context switch
 	if(Current_running_TCB != Prev_TCB){
@@ -95,4 +89,16 @@ void insert_into_ready(volatile Task_Control_Block_t * TCB_to_insert) {
 		}
 		Find_last->Next_TCB = TCB_to_insert;
 	}
+}
+
+void remove_from_ready(volatile Task_Control_Block_t * TCB_to_remove) {
+	if (TCB_to_remove->Next_TCB == NULL) {
+		Ready_TCBs[TCB_to_remove->Priority] = NULL;
+		Ready_queue_bit_vector &= ~(1 << TCB_to_remove->Priority);
+	}
+	else {
+		Ready_TCBs[TCB_to_remove->Priority] = TCB_to_remove->Next_TCB;
+	}
+	//Detach from the Ready queue
+	TCB_to_remove->Next_TCB = NULL;
 }

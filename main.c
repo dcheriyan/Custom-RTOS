@@ -71,9 +71,76 @@ void signal_semaphore (counting_semaphore_t* requested_semaphore) {
     }
 }
 
-/******** Semaphore Variables ********/
+/******** Mutex ********/
+typedef struct {
+    bool available;
+	uint8_t lowest_priority; //Lower priority means more important, find another name?
+	uint8_t original_priority; //In case we temporarily raise a task's importance for priority inheritance
+	volatile Task_Control_Block_t * owner;
+	volatile Task_Control_Block_t * waiting_queue;
+} mutex_t;
+
+void init_mutex(mutex_t * input_mutex) {
+	input_mutex->available = true;
+	input_mutex->lowest_priority = 5;
+	input_mutex->original_priority = 5;
+	input_mutex->owner = NULL;
+	input_mutex->waiting_queue = NULL;
+}
+
+void acquire_mutex(mutex_t * requested_mutex) {
+	while (!requested_mutex->available) {
+		if (Current_running_TCB->Current_state != Blocked) {
+            //block
+            Current_running_TCB->Current_state = Blocked;
+            Current_running_TCB->Next_TCB = requested_mutex->waiting_queue;
+            requested_mutex->waiting_queue = Current_running_TCB;
+			//Update lowest priority for priority inheritance
+			if (Current_running_TCB->Priority < requested_mutex->lowest_priority) {
+				requested_mutex->lowest_priority = Current_running_TCB->Priority;
+//				volatile Task_Control_Block_t * TCB_to_remove;
+				//remove owner from Ready TCB
+				remove_from_ready(requested_mutex->owner);
+				requested_mutex->owner->Priority = Current_running_TCB->Priority;
+				//reinsert owner into readyTCB
+				insert_into_ready(requested_mutex->owner);
+			}
+        }
+	}
+	requested_mutex->available = false;
+	requested_mutex->owner = Current_running_TCB;
+	requested_mutex->original_priority = Current_running_TCB->Priority;
+	requested_mutex->lowest_priority = Current_running_TCB->Priority;
+}
+
+void release_mutex(mutex_t * requested_mutex) {
+	//Check for owner
+	if (Current_running_TCB == requested_mutex->owner) {
+		//Release mutex
+		requested_mutex->available = true;
+		//Return to original priority
+		Current_running_TCB->Priority = requested_mutex->original_priority;
+	}
+	//unblock all waiting
+
+	volatile Task_Control_Block_t * TCB_to_remove;
+
+    //unblock all, scheduler will ensure highest prio runs first, assuming scheduler does not interrupt here for now (later use a better data structure to ensure highest prio is first removed)
+    while (requested_mutex->waiting_queue != NULL){
+        //unblock
+		TCB_to_remove = requested_mutex->waiting_queue;
+		requested_mutex->waiting_queue = TCB_to_remove->Next_TCB;
+		TCB_to_remove->Current_state = Ready;
+        insert_into_ready(TCB_to_remove);
+		//detach from waiting queue
+        TCB_to_remove->Next_TCB = NULL;
+    }
+}
+
+/******** Synchronization Global Variables ********/
 counting_semaphore_t Ready_to_Write;
 counting_semaphore_t Ready_to_Read;
+mutex_t test_mutex;
 
 uint16_t mail;
 
@@ -118,7 +185,9 @@ void Task1_function (void *Input_args){
 	uint32_t prev = -period;
 	while(true) {
 		if((uint32_t)(msTicks - prev) >= period) {
+			acquire_mutex(&test_mutex);
 			printf("Task 1 @ %d \n", msTicks);
+			release_mutex(&test_mutex);
 			prev += period;
 			TCBs[1].Current_state = Inactive;
 			TCBs[1].Number_of_Occur++;
@@ -168,6 +237,11 @@ void Task4_function (void *Input_args){
 	uint32_t prev = -period;
 	while(true) {
 		if((uint32_t)(msTicks - prev) >= period) {
+			acquire_mutex(&test_mutex);
+			while(TCBs[1].Number_of_Occur*250 > msTicks){
+				//busy loop to force priority inheritance
+			}
+			release_mutex(&test_mutex);
 			printf("Task 4 @ %d \n", msTicks);
 			prev += period;
 			TCBs[4].Current_state = Inactive;
@@ -184,6 +258,7 @@ int main(void) {
 
 	Kernel_Init();
 
+	init_mutex(&test_mutex);
 	init_semaphore(&Ready_to_Write, 1);
 	init_semaphore(&Ready_to_Read, 0);
 
