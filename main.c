@@ -26,6 +26,57 @@ uint32_t Ready_queue_bit_vector;
 volatile uint32_t Previous_top_stack = (uint32_t)-1;
 volatile uint32_t Next_top_stack;
 
+/******** Semaphores ********/
+
+typedef struct {
+    uint8_t counter;
+    volatile Task_Control_Block_t * waiting_queue;
+} counting_semaphore_t;
+
+//init - initialize counter value 's'
+void init_semaphore(counting_semaphore_t* input_semaphore, uint8_t initial_value){
+    input_semaphore->counter = initial_value;
+    input_semaphore->waiting_queue = NULL;
+}
+
+//wait - try to decrement, block if 's' = 0
+void wait_semaphore (counting_semaphore_t* requested_semaphore) {
+    while (requested_semaphore->counter == 0){
+        if (Current_running_TCB->Current_state != Blocked) {
+            //block
+            Current_running_TCB->Current_state = Blocked;
+            Current_running_TCB->Next_TCB = requested_semaphore->waiting_queue;
+            requested_semaphore->waiting_queue = Current_running_TCB;
+        }
+    }
+
+    //decrement counter
+    requested_semaphore->counter--;
+}
+
+//signal - increment 's'
+void signal_semaphore (counting_semaphore_t* requested_semaphore) {
+    requested_semaphore->counter++;
+	volatile Task_Control_Block_t * TCB_to_remove;
+
+    //unblock all, scheduler will ensure highest prio runs first, assuming scheduler does not interrupt here for now (later use a better data structure to ensure highest prio is first removed)
+    while (requested_semaphore->waiting_queue != NULL){
+        //unblock
+		TCB_to_remove = requested_semaphore->waiting_queue;
+		requested_semaphore->waiting_queue = TCB_to_remove->Next_TCB;
+		TCB_to_remove->Current_state = Ready;
+        insert_into_ready(TCB_to_remove);
+		//detach from waiting queue
+        TCB_to_remove->Next_TCB = NULL;
+    }
+}
+
+/******** Semaphore Variables ********/
+counting_semaphore_t Ready_to_Write;
+counting_semaphore_t Ready_to_Read;
+
+uint16_t mail;
+
 /******** Interrupts ********/
 void SysTick_Handler(void) {
     msTicks++;
@@ -63,11 +114,11 @@ __asm void PendSV_Handler(void) {
 
 /******** Task Functions ********/
 void Task1_function (void *Input_args){
-	uint32_t period = 500; // 0.5s
+	uint32_t period = 200; // 0.2s
 	uint32_t prev = -period;
 	while(true) {
 		if((uint32_t)(msTicks - prev) >= period) {
-			printf("Task 1... \n");
+			printf("Task 1 @ %d \n", msTicks);
 			prev += period;
 			TCBs[1].Current_state = Inactive;
 			TCBs[1].Number_of_Occur++;
@@ -75,12 +126,18 @@ void Task1_function (void *Input_args){
 	}
 }
 
+
+//Producer
 void Task2_function (void *Input_args){
-	uint32_t period = 1000; // 1s
+	uint32_t period = 400; // 0.4s
 	uint32_t prev = -period;
 	while(true) {
 		if((uint32_t)(msTicks - prev) >= period) {
-			printf("Task 2... \n");
+			printf("Task 2 @ %d \n", msTicks);
+			wait_semaphore(&Ready_to_Write);
+			printf("Writing mail \n");
+			mail = msTicks;
+			signal_semaphore(&Ready_to_Read);
 			prev += period;
 			TCBs[2].Current_state = Inactive;
 			TCBs[2].Number_of_Occur++;
@@ -88,12 +145,17 @@ void Task2_function (void *Input_args){
 	}
 }
 
+//Consumer
 void Task3_function (void *Input_args){
-	uint32_t period = 1000; // 1s
+	uint32_t period = 300; // 0.3s
 	uint32_t prev = -period;
 	while(true) {
 		if((uint32_t)(msTicks - prev) >= period) {
-			printf("Task 3... \n");
+			printf("Task 3 @ %d \n", msTicks);
+			wait_semaphore(&Ready_to_Read);
+			printf("Mail is: %d \n", mail);
+			mail = 0;
+			signal_semaphore(&Ready_to_Write);
 			prev += period;
 			TCBs[3].Current_state = Inactive;
 			TCBs[3].Number_of_Occur++;
@@ -102,11 +164,11 @@ void Task3_function (void *Input_args){
 }
 
 void Task4_function (void *Input_args){
-	uint32_t period = 1500; // 1.5s
+	uint32_t period = 700; // 0.7s
 	uint32_t prev = -period;
 	while(true) {
 		if((uint32_t)(msTicks - prev) >= period) {
-			printf("Task 4... \n");
+			printf("Task 4 @ %d \n", msTicks);
 			prev += period;
 			TCBs[4].Current_state = Inactive;
 			TCBs[4].Number_of_Occur++;
@@ -122,10 +184,13 @@ int main(void) {
 
 	Kernel_Init();
 
-	bool Task_one_status = create_task(&Task1_function, NULL, 1, 1, 500);
-	bool Task_two_status = create_task(&Task2_function, NULL, 2, 2, 1000);
-	bool Task_three_status = create_task(&Task3_function, NULL, 3, 2, 1000);
-	bool Task_four_status = create_task(&Task4_function, NULL, 4, 4, 1500);
+	init_semaphore(&Ready_to_Write, 1);
+	init_semaphore(&Ready_to_Read, 0);
+
+	bool Task_one_status = create_task(&Task1_function, NULL, 1, 1, 200);
+	bool Task_two_status = create_task(&Task2_function, NULL, 2, 2, 400);
+	bool Task_three_status = create_task(&Task3_function, NULL, 3, 2, 300);
+	bool Task_four_status = create_task(&Task4_function, NULL, 4, 4, 700);
 
 	Kernel_Start();
 }
