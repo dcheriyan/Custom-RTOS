@@ -5,6 +5,7 @@
 
 #include "Startup.h"
 #include "Scheduler.h"
+#include "Synchronization.h"
 
 /******** Global Variables ********/
 uint32_t msTicks = 0;
@@ -26,54 +27,10 @@ uint32_t Ready_queue_bit_vector;
 volatile uint32_t Previous_top_stack = (uint32_t)-1;
 volatile uint32_t Next_top_stack;
 
-/******** Semaphores ********/
-
-typedef struct {
-    uint8_t counter;
-    volatile Task_Control_Block_t * waiting_queue;
-} counting_semaphore_t;
-
-//init - initialize counter value 's'
-void init_semaphore(counting_semaphore_t* input_semaphore, uint8_t initial_value){
-    input_semaphore->counter = initial_value;
-    input_semaphore->waiting_queue = NULL;
-}
-
-//wait - try to decrement, block if 's' = 0
-void wait_semaphore (counting_semaphore_t* requested_semaphore) {
-    while (requested_semaphore->counter == 0){
-        if (Current_running_TCB->Current_state != Blocked) {
-            //block
-            Current_running_TCB->Current_state = Blocked;
-            Current_running_TCB->Next_TCB = requested_semaphore->waiting_queue;
-            requested_semaphore->waiting_queue = Current_running_TCB;
-        }
-    }
-
-    //decrement counter
-    requested_semaphore->counter--;
-}
-
-//signal - increment 's'
-void signal_semaphore (counting_semaphore_t* requested_semaphore) {
-    requested_semaphore->counter++;
-	volatile Task_Control_Block_t * TCB_to_remove;
-
-    //unblock all, scheduler will ensure highest prio runs first, assuming scheduler does not interrupt here for now (later use a better data structure to ensure highest prio is first removed)
-    while (requested_semaphore->waiting_queue != NULL){
-        //unblock
-		TCB_to_remove = requested_semaphore->waiting_queue;
-		requested_semaphore->waiting_queue = TCB_to_remove->Next_TCB;
-		TCB_to_remove->Current_state = Ready;
-        insert_into_ready(TCB_to_remove);
-		//detach from waiting queue
-        TCB_to_remove->Next_TCB = NULL;
-    }
-}
-
-/******** Semaphore Variables ********/
+// Synchronization
 counting_semaphore_t Ready_to_Write;
 counting_semaphore_t Ready_to_Read;
+mutex_t test_mutex;
 
 uint16_t mail;
 
@@ -118,7 +75,9 @@ void Task1_function (void *Input_args){
 	uint32_t prev = -period;
 	while(true) {
 		if((uint32_t)(msTicks - prev) >= period) {
+			acquire_mutex(&test_mutex);
 			printf("Task 1 @ %d \n", msTicks);
+			release_mutex(&test_mutex);
 			prev += period;
 			TCBs[1].Current_state = Inactive;
 			TCBs[1].Number_of_Occur++;
@@ -168,6 +127,11 @@ void Task4_function (void *Input_args){
 	uint32_t prev = -period;
 	while(true) {
 		if((uint32_t)(msTicks - prev) >= period) {
+			acquire_mutex(&test_mutex);
+			while(TCBs[1].Number_of_Occur*250 > msTicks){
+				//busy loop to force priority inheritance
+			}
+			release_mutex(&test_mutex);
 			printf("Task 4 @ %d \n", msTicks);
 			prev += period;
 			TCBs[4].Current_state = Inactive;
@@ -184,6 +148,7 @@ int main(void) {
 
 	Kernel_Init();
 
+	init_mutex(&test_mutex);
 	init_semaphore(&Ready_to_Write, 1);
 	init_semaphore(&Ready_to_Read, 0);
 
